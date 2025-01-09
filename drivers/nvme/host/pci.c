@@ -3760,6 +3760,8 @@ static const struct pci_device_id nvme_id_table[] = {
 				NVME_QUIRK_SHARED_TAGS |
 				NVME_QUIRK_SKIP_CID_GEN |
 				NVME_QUIRK_IDENTIFY_CNS },
+	{ PCI_DEVICE(0x15b7, 0x5003), /* WDC PC SN520 SDAPNUW-512G-1014 */
+		.driver_data = NVME_QUIRK_NO_DEEPEST_PS },
 	{ PCI_DEVICE_CLASS(PCI_CLASS_STORAGE_EXPRESS, 0xffffff) },
 	{ 0, }
 };
