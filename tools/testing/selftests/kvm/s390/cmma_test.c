@@ -34,15 +34,21 @@ static char cmma_value_buf[MAIN_PAGE_COUNT + TEST_DATA_PAGE_COUNT];
 /**
  * Dirty CMMA attributes of exactly one page in the TEST_DATA memslot,
  * so use_cmma goes on and the CMMA related ioctls do something.
+ * Touch the page at offset 1M inside TEST_DATA to make sure its page
+ * tables are allocated in the host.
  */
 static void guest_do_one_essa(void)
 {
 	asm volatile(
 		/* load TEST_DATA_START_GFN into r1 */
+		"	xgr 1,1\n"
 		"	llilf 1,%[start_gfn]\n"
 		/* calculate the address from the gfn */
 		"	sllg 1,1,12(0)\n"
 		/* set the first page in TEST_DATA memslot to STABLE */
+		"	.insn rrf,0xb9ab0000,2,1,1,0\n"
+		"	agfi 1,0x100000\n"
+		/* also touch the first page of the second MB of TEST_DATA */
 		"	.insn rrf,0xb9ab0000,2,1,1,0\n"
 		/* hypercall */
 		"	diag 0,0,0x501\n"
@@ -145,7 +151,7 @@ static void finish_vm_setup(struct kvm_vm *vm)
 	slot0 = memslot2region(vm, 0);
 	ucall_init(vm, slot0->region.guest_phys_addr + slot0->region.memory_size);
 
-	kvm_arch_vm_post_create(vm);
+	kvm_arch_vm_post_create(vm, 0);
 }
 
 static struct kvm_vm *create_vm_two_memslots(void)
@@ -444,7 +450,7 @@ static void assert_no_pages_cmma_dirty(struct kvm_vm *vm)
 			 );
 }
 
-static void test_get_inital_dirty(void)
+static void test_get_initial_dirty(void)
 {
 	struct kvm_vm *vm = create_vm_two_memslots();
 	struct kvm_vcpu *vcpu;
@@ -651,7 +657,7 @@ struct testdef {
 } testlist[] = {
 	{ "migration mode and dirty tracking", test_migration_mode },
 	{ "GET_CMMA_BITS: basic calls", test_get_cmma_basic },
-	{ "GET_CMMA_BITS: all pages are dirty initally", test_get_inital_dirty },
+	{ "GET_CMMA_BITS: all pages are dirty initially", test_get_initial_dirty },
 	{ "GET_CMMA_BITS: holes are skipped", test_get_skip_holes },
 };
 

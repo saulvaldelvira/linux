@@ -363,10 +363,10 @@ static struct cache_dfs_tgt *alloc_target(const char *name, int path_consumed)
 {
 	struct cache_dfs_tgt *t;
 
-	t = kmalloc(sizeof(*t), GFP_ATOMIC);
+	t = kmalloc_obj(*t, GFP_KERNEL);
 	if (!t)
 		return ERR_PTR(-ENOMEM);
-	t->name = kstrdup(name, GFP_ATOMIC);
+	t->name = kstrdup(name, GFP_KERNEL);
 	if (!t->name) {
 		kfree(t);
 		return ERR_PTR(-ENOMEM);
@@ -626,7 +626,7 @@ static int update_cache_entry_locked(struct cache_entry *ce, const struct dfs_in
 
 	target = READ_ONCE(ce->tgthint);
 	if (target) {
-		th = kstrdup(target->name, GFP_ATOMIC);
+		th = kstrdup(target->name, GFP_KERNEL);
 		if (!th)
 			return -ENOMEM;
 	}
@@ -760,11 +760,11 @@ static int setup_referral(const char *path, struct cache_entry *ce,
 
 	memset(ref, 0, sizeof(*ref));
 
-	ref->path_name = kstrdup(path, GFP_ATOMIC);
+	ref->path_name = kstrdup(path, GFP_KERNEL);
 	if (!ref->path_name)
 		return -ENOMEM;
 
-	ref->node_name = kstrdup(target, GFP_ATOMIC);
+	ref->node_name = kstrdup(target, GFP_KERNEL);
 	if (!ref->node_name) {
 		rc = -ENOMEM;
 		goto err_free_path;
@@ -796,7 +796,7 @@ static int get_targets(struct cache_entry *ce, struct dfs_cache_tgt_list *tl)
 	INIT_LIST_HEAD(head);
 
 	list_for_each_entry(t, &ce->tlist, list) {
-		it = kzalloc(sizeof(*it), GFP_ATOMIC);
+		it = kzalloc_obj(*it, GFP_ATOMIC);
 		if (!it) {
 			rc = -ENOMEM;
 			goto err_free_it;
@@ -1120,54 +1120,79 @@ static bool target_share_equal(struct cifs_tcon *tcon, const char *s1)
 	return match;
 }
 
-static bool is_ses_good(struct cifs_ses *ses)
+static bool is_ses_good(struct cifs_tcon *tcon, struct cifs_ses *ses)
 {
 	struct TCP_Server_Info *server = ses->server;
-	struct cifs_tcon *tcon = ses->tcon_ipc;
+	struct cifs_tcon *ipc = NULL;
 	bool ret;
 
+	spin_lock(&cifs_tcp_ses_lock);
 	spin_lock(&ses->ses_lock);
 	spin_lock(&ses->chan_lock);
+
 	ret = !cifs_chan_needs_reconnect(ses, server) &&
-		ses->ses_status == SES_GOOD &&
-		!tcon->need_reconnect;
+		ses->ses_status == SES_GOOD;
+
 	spin_unlock(&ses->chan_lock);
+
+	if (!ret)
+		goto out;
+
+	if (likely(ses->tcon_ipc)) {
+		if (ses->tcon_ipc->need_reconnect) {
+			ret = false;
+			goto out;
+		}
+	} else {
+		spin_unlock(&ses->ses_lock);
+		spin_unlock(&cifs_tcp_ses_lock);
+
+		ipc = cifs_setup_ipc(ses, tcon->seal);
+
+		spin_lock(&cifs_tcp_ses_lock);
+		spin_lock(&ses->ses_lock);
+		if (!IS_ERR(ipc)) {
+			if (!ses->tcon_ipc) {
+				ses->tcon_ipc = ipc;
+				ipc = NULL;
+			}
+		} else {
+			ret = false;
+			ipc = NULL;
+		}
+	}
+
+out:
 	spin_unlock(&ses->ses_lock);
+	spin_unlock(&cifs_tcp_ses_lock);
+	if (ipc && server->ops->tree_disconnect) {
+		unsigned int xid = get_xid();
+
+		(void)server->ops->tree_disconnect(xid, ipc);
+		_free_xid(xid);
+	}
+	tconInfoFree(ipc, netfs_trace_tcon_ref_free_ipc);
 	return ret;
 }
 
-static char *get_ses_refpath(struct cifs_ses *ses)
-{
-	struct TCP_Server_Info *server = ses->server;
-	char *path = ERR_PTR(-ENOENT);
-
-	if (server->leaf_fullpath) {
-		path = kstrdup(server->leaf_fullpath + 1, GFP_KERNEL);
-		if (!path)
-			path = ERR_PTR(-ENOMEM);
-	}
-	return path;
-}
-
 /* Refresh dfs referral of @ses */
-static void refresh_ses_referral(struct cifs_ses *ses)
+static void refresh_ses_referral(struct cifs_tcon *tcon, struct cifs_ses *ses)
 {
 	struct cache_entry *ce;
 	unsigned int xid;
-	char *path;
+	const char *path;
 	int rc = 0;
 
 	xid = get_xid();
 
-	path = get_ses_refpath(ses);
+	path = dfs_ses_refpath(ses);
 	if (IS_ERR(path)) {
 		rc = PTR_ERR(path);
-		path = NULL;
 		goto out;
 	}
 
 	ses = CIFS_DFS_ROOT_SES(ses);
-	if (!is_ses_good(ses)) {
+	if (!is_ses_good(tcon, ses)) {
 		cifs_dbg(FYI, "%s: skip cache refresh due to disconnected ipc\n",
 			 __func__);
 		goto out;
@@ -1181,7 +1206,6 @@ static void refresh_ses_referral(struct cifs_ses *ses)
 
 out:
 	free_xid(xid);
-	kfree(path);
 }
 
 static int __refresh_tcon_referral(struct cifs_tcon *tcon,
@@ -1231,19 +1255,18 @@ static void refresh_tcon_referral(struct cifs_tcon *tcon, bool force_refresh)
 	struct dfs_info3_param *refs = NULL;
 	struct cache_entry *ce;
 	struct cifs_ses *ses;
-	unsigned int xid;
 	bool needs_refresh;
-	char *path;
+	const char *path;
+	unsigned int xid;
 	int numrefs = 0;
 	int rc = 0;
 
 	xid = get_xid();
 	ses = tcon->ses;
 
-	path = get_ses_refpath(ses);
+	path = dfs_ses_refpath(ses);
 	if (IS_ERR(path)) {
 		rc = PTR_ERR(path);
-		path = NULL;
 		goto out;
 	}
 
@@ -1257,7 +1280,7 @@ static void refresh_tcon_referral(struct cifs_tcon *tcon, bool force_refresh)
 	up_read(&htable_rw_lock);
 
 	ses = CIFS_DFS_ROOT_SES(ses);
-	if (!is_ses_good(ses)) {
+	if (!is_ses_good(tcon, ses)) {
 		cifs_dbg(FYI, "%s: skip cache refresh due to disconnected ipc\n",
 			 __func__);
 		goto out;
@@ -1271,7 +1294,6 @@ static void refresh_tcon_referral(struct cifs_tcon *tcon, bool force_refresh)
 
 out:
 	free_xid(xid);
-	kfree(path);
 	free_dfs_info_array(refs, numrefs);
 }
 
@@ -1306,12 +1328,12 @@ int dfs_cache_remount_fs(struct cifs_sb_info *cifs_sb)
 	 * After reconnecting to a different server, unique ids won't match anymore, so we disable
 	 * serverino. This prevents dentry revalidation to think the dentry are stale (ESTALE).
 	 */
-	cifs_autodisable_serverino(cifs_sb);
+	cifs_autodisable_serverino(cifs_sb, "DFS failover may potentially connect to a different server, inode numbers won't match anymore", 0);
 	/*
 	 * Force the use of prefix path to support failover on DFS paths that resolve to targets
 	 * that have different prefix paths.
 	 */
-	cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_USE_PREFIX_PATH;
+	atomic_or(CIFS_MOUNT_USE_PREFIX_PATH, &cifs_sb->mnt_cifs_flags);
 
 	refresh_tcon_referral(tcon, true);
 	return 0;
@@ -1326,7 +1348,7 @@ void dfs_cache_refresh(struct work_struct *work)
 	tcon = container_of(work, struct cifs_tcon, dfs_cache_work.work);
 
 	list_for_each_entry(ses, &tcon->dfs_ses_list, dlist)
-		refresh_ses_referral(ses);
+		refresh_ses_referral(tcon, ses);
 	refresh_tcon_referral(tcon, false);
 
 	queue_delayed_work(dfscache_wq, &tcon->dfs_cache_work,

@@ -12,9 +12,10 @@
 static void netfs_reissue_read(struct netfs_io_request *rreq,
 			       struct netfs_io_subrequest *subreq)
 {
+	subreq->error = 0;
 	__clear_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
 	__set_bit(NETFS_SREQ_IN_PROGRESS, &subreq->flags);
-	netfs_get_subrequest(subreq, netfs_sreq_trace_get_resubmit);
+	netfs_stat(&netfs_n_rh_retry_read_subreq);
 	subreq->rreq->netfs_ops->issue_read(subreq);
 }
 
@@ -48,6 +49,7 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 				__clear_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
 				subreq->retry_count++;
 				netfs_reset_iter(subreq);
+				netfs_get_subrequest(subreq, netfs_sreq_trace_get_resubmit);
 				netfs_reissue_read(rreq, subreq);
 			}
 		}
@@ -75,7 +77,7 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 		struct iov_iter source;
 		unsigned long long start, len;
 		size_t part;
-		bool boundary = false;
+		bool boundary = false, subreq_superfluous = false;
 
 		/* Go through the subreqs and find the next span of contiguous
 		 * buffer that we then rejig (cifs, for example, needs the
@@ -91,10 +93,17 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 		       from->start, from->transferred, from->len);
 
 		if (test_bit(NETFS_SREQ_FAILED, &from->flags) ||
-		    !test_bit(NETFS_SREQ_NEED_RETRY, &from->flags))
+		    !test_bit(NETFS_SREQ_NEED_RETRY, &from->flags)) {
+			subreq = from;
 			goto abandon;
+		}
 
-		list_for_each_continue(next, &stream->subrequests) {
+		for (;;) {
+			/* Read pointer to subreq before reading subreq state. */
+			next = smp_load_acquire(&next->next);
+			if (next == &stream->subrequests)
+				break;
+
 			subreq = list_entry(next, struct netfs_io_subrequest, rreq_link);
 			if (subreq->start + subreq->transferred != start + len ||
 			    test_bit(NETFS_SREQ_BOUNDARY, &subreq->flags) ||
@@ -116,8 +125,10 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 		/* Work through the sublist. */
 		subreq = from;
 		list_for_each_entry_from(subreq, &stream->subrequests, rreq_link) {
-			if (!len)
+			if (!len) {
+				subreq_superfluous = true;
 				break;
+			}
 			subreq->source	= NETFS_DOWNLOAD_FROM_SERVER;
 			subreq->start	= start - subreq->transferred;
 			subreq->len	= len   + subreq->transferred;
@@ -154,24 +165,29 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 
 			netfs_get_subrequest(subreq, netfs_sreq_trace_get_resubmit);
 			netfs_reissue_read(rreq, subreq);
-			if (subreq == to)
+			if (subreq == to) {
+				subreq_superfluous = false;
 				break;
+			}
 		}
 
 		/* If we managed to use fewer subreqs, we can discard the
 		 * excess; if we used the same number, then we're done.
 		 */
 		if (!len) {
-			if (subreq == to)
+			if (!subreq_superfluous)
 				continue;
 			list_for_each_entry_safe_from(subreq, tmp,
 						      &stream->subrequests, rreq_link) {
-				trace_netfs_sreq(subreq, netfs_sreq_trace_discard);
+				trace_netfs_sreq(subreq, netfs_sreq_trace_superfluous);
+				spin_lock(&rreq->lock);
 				list_del(&subreq->rreq_link);
-				netfs_put_subrequest(subreq, false, netfs_sreq_trace_put_done);
+				spin_unlock(&rreq->lock);
+				netfs_put_subrequest(subreq, netfs_sreq_trace_put_done);
 				if (subreq == to)
 					break;
 			}
+			subreq = NULL;
 			continue;
 		}
 
@@ -187,17 +203,17 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 			subreq->source		= NETFS_DOWNLOAD_FROM_SERVER;
 			subreq->start		= start;
 			subreq->len		= len;
-			subreq->debug_index	= atomic_inc_return(&rreq->subreq_counter);
 			subreq->stream_nr	= stream->stream_nr;
 			subreq->retry_count	= 1;
 
 			trace_netfs_sreq_ref(rreq->debug_id, subreq->debug_index,
 					     refcount_read(&subreq->ref),
 					     netfs_sreq_trace_new);
-			netfs_get_subrequest(subreq, netfs_sreq_trace_get_resubmit);
 
+			spin_lock(&rreq->lock);
 			list_add(&subreq->rreq_link, &to->rreq_link);
-			to = list_next_entry(to, rreq_link);
+			spin_unlock(&rreq->lock);
+			to = subreq;
 			trace_netfs_sreq(subreq, netfs_sreq_trace_retry);
 
 			stream->sreq_max_len	= umin(len, rreq->rsize);
@@ -239,8 +255,7 @@ abandon_after:
 	subreq = list_next_entry(subreq, rreq_link);
 abandon:
 	list_for_each_entry_from(subreq, &stream->subrequests, rreq_link) {
-		if (!subreq->error &&
-		    !test_bit(NETFS_SREQ_FAILED, &subreq->flags) &&
+		if (!test_bit(NETFS_SREQ_FAILED, &subreq->flags) &&
 		    !test_bit(NETFS_SREQ_NEED_RETRY, &subreq->flags))
 			continue;
 		subreq->error = -ENOMEM;
@@ -254,16 +269,16 @@ abandon:
  */
 void netfs_retry_reads(struct netfs_io_request *rreq)
 {
-	struct netfs_io_subrequest *subreq;
 	struct netfs_io_stream *stream = &rreq->io_streams[0];
+
+	netfs_stat(&netfs_n_rh_retry_read_req);
 
 	/* Wait for all outstanding I/O to quiesce before performing retries as
 	 * we may need to renegotiate the I/O sizes.
 	 */
-	list_for_each_entry(subreq, &stream->subrequests, rreq_link) {
-		wait_on_bit(&subreq->flags, NETFS_SREQ_IN_PROGRESS,
-			    TASK_UNINTERRUPTIBLE);
-	}
+	set_bit(NETFS_RREQ_RETRYING, &rreq->flags);
+	netfs_wait_for_in_progress_stream(rreq, stream);
+	clear_bit(NETFS_RREQ_RETRYING, &rreq->flags);
 
 	trace_netfs_rreq(rreq, netfs_rreq_trace_resubmit);
 	netfs_retry_read_subrequests(rreq);
@@ -282,8 +297,15 @@ void netfs_unlock_abandoned_read_pages(struct netfs_io_request *rreq)
 			struct folio *folio = folioq_folio(p, slot);
 
 			if (folio && !folioq_is_marked2(p, slot)) {
-				trace_netfs_folio(folio, netfs_folio_trace_abandon);
-				folio_unlock(folio);
+				if (folio == rreq->no_unlock_folio &&
+				    test_bit(NETFS_RREQ_NO_UNLOCK_FOLIO,
+					     &rreq->flags)) {
+					_debug("no unlock");
+				} else {
+					trace_netfs_folio(folio,
+						netfs_folio_trace_abandon);
+					folio_unlock(folio);
+				}
 			}
 		}
 	}

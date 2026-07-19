@@ -14,8 +14,14 @@ static enum scx_test_status setup(void **ctx)
 {
 	struct maximal *skel;
 
-	skel = maximal__open_and_load();
-	SCX_FAIL_IF(!skel, "Failed to open and load skel");
+	skel = maximal__open();
+	SCX_FAIL_IF(!skel, "Failed to open");
+	SCX_ENUM_INIT(skel);
+	SCX_FAIL_IF(maximal__load(skel), "Failed to load skel");
+
+	bpf_map__set_autoattach(skel->maps.maximal_ops, false);
+	SCX_FAIL_IF(maximal__attach(skel), "Failed to attach skel");
+
 	*ctx = skel;
 
 	return SCX_TEST_PASS;

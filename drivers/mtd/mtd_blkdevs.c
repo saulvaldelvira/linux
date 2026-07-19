@@ -246,9 +246,9 @@ unlock:
 	blktrans_dev_put(dev);
 }
 
-static int blktrans_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+static int blktrans_getgeo(struct gendisk *disk, struct hd_geometry *geo)
 {
-	struct mtd_blktrans_dev *dev = bdev->bd_disk->private_data;
+	struct mtd_blktrans_dev *dev = disk->private_data;
 	int ret = -ENXIO;
 
 	mutex_lock(&dev->lock);
@@ -324,7 +324,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 		new->readonly = 1;
 
 	ret = -ENOMEM;
-	new->tag_set = kzalloc(sizeof(*new->tag_set), GFP_KERNEL);
+	new->tag_set = kzalloc_obj(*new->tag_set);
 	if (!new->tag_set)
 		goto out_list_del;
 
@@ -404,6 +404,7 @@ out_list_del:
 int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 {
 	unsigned long flags;
+	unsigned int memflags;
 
 	lockdep_assert_held(&mtd_table_mutex);
 
@@ -420,10 +421,10 @@ int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 	spin_unlock_irqrestore(&old->queue_lock, flags);
 
 	/* freeze+quiesce queue to ensure all requests are flushed */
-	blk_mq_freeze_queue(old->rq);
+	memflags = blk_mq_freeze_queue(old->rq);
 	blk_mq_quiesce_queue(old->rq);
 	blk_mq_unquiesce_queue(old->rq);
-	blk_mq_unfreeze_queue(old->rq);
+	blk_mq_unfreeze_queue(old->rq, memflags);
 
 	/* If the device is currently open, tell trans driver to close it,
 		then put mtd device, and don't touch it again */

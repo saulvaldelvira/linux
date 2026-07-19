@@ -99,7 +99,7 @@ struct mctp_i3c_internal_hdr {
 
 static int mctp_i3c_read(struct mctp_i3c_device *mi)
 {
-	struct i3c_priv_xfer xfer = { .rnw = 1, .len = mi->mrl };
+	struct i3c_xfer xfer = { .rnw = 1, .len = mi->mrl };
 	struct net_device_stats *stats = &mi->mbus->ndev->stats;
 	struct mctp_i3c_internal_hdr *ihdr = NULL;
 	struct sk_buff *skb = NULL;
@@ -127,7 +127,7 @@ static int mctp_i3c_read(struct mctp_i3c_device *mi)
 
 	/* Make sure netif_rx() is read in the same order as i3c. */
 	mutex_lock(&mi->lock);
-	rc = i3c_device_do_priv_xfers(mi->i3c, &xfer, 1);
+	rc = i3c_device_do_xfers(mi->i3c, &xfer, 1, I3C_SDR);
 	if (rc < 0)
 		goto err;
 
@@ -259,7 +259,7 @@ __must_hold(&busdevs_lock)
 	struct mctp_i3c_device *mi = NULL;
 	int rc;
 
-	mi = kzalloc(sizeof(*mi), GFP_KERNEL);
+	mi = kzalloc_obj(*mi);
 	if (!mi) {
 		rc = -ENOMEM;
 		goto err;
@@ -360,7 +360,7 @@ mctp_i3c_lookup(struct mctp_i3c_bus *mbus, u64 pid)
 static void mctp_i3c_xmit(struct mctp_i3c_bus *mbus, struct sk_buff *skb)
 {
 	struct net_device_stats *stats = &mbus->ndev->stats;
-	struct i3c_priv_xfer xfer = { .rnw = false };
+	struct i3c_xfer xfer = { .rnw = false };
 	struct mctp_i3c_internal_hdr *ihdr = NULL;
 	struct mctp_i3c_device *mi = NULL;
 	unsigned int data_len;
@@ -409,7 +409,7 @@ static void mctp_i3c_xmit(struct mctp_i3c_bus *mbus, struct sk_buff *skb)
 	data[data_len] = pec;
 
 	xfer.data.out = data;
-	rc = i3c_device_do_priv_xfers(mi->i3c, &xfer, 1);
+	rc = i3c_device_do_xfers(mi->i3c, &xfer, 1, I3C_SDR);
 	if (rc == 0) {
 		stats->tx_bytes += data_len;
 		stats->tx_packets++;
@@ -506,6 +506,14 @@ static int mctp_i3c_header_create(struct sk_buff *skb, struct net_device *dev,
 	   const void *saddr, unsigned int len)
 {
 	struct mctp_i3c_internal_hdr *ihdr;
+	int rc;
+
+	if (!daddr || !saddr)
+		return -EINVAL;
+
+	rc = skb_cow_head(skb, sizeof(struct mctp_i3c_internal_hdr));
+	if (rc)
+		return rc;
 
 	skb_push(skb, sizeof(struct mctp_i3c_internal_hdr));
 	skb_reset_mac_header(skb);

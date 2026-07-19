@@ -25,6 +25,7 @@
 #define SESSION_HASH_SIZE	512
 
 struct cld_net;
+struct nfsd_net_cb;
 struct nfsd4_client_tracking_ops;
 
 enum {
@@ -66,6 +67,7 @@ struct nfsd_net {
 
 	struct lock_manager nfsd4_manager;
 	bool grace_ended;
+	bool grace_end_forced;
 	time64_t boot_time;
 
 	struct dentry *nfsd_client_dir;
@@ -98,6 +100,9 @@ struct nfsd_net {
 	 */
 	struct list_head client_lru;
 	struct list_head close_lru;
+
+	/* protects del_recall_lru and delegation hash/unhash */
+	spinlock_t deleg_lock ____cacheline_aligned;
 	struct list_head del_recall_lru;
 
 	/* protected by blocked_locks_lock */
@@ -129,10 +134,10 @@ struct nfsd_net {
 	unsigned char writeverf[8];
 
 	/*
-	 * Max number of connections this nfsd container will allow. Defaults
-	 * to '0' which is means that it bases this on the number of threads.
+	 * Minimum number of threads to run per pool.  If 0 then the
+	 * min == max requested number of threads.
 	 */
-	unsigned int max_connections;
+	unsigned int min_threads;
 
 	u32 clientid_base;
 	u32 clientid_counter;
@@ -140,9 +145,10 @@ struct nfsd_net {
 
 	struct svc_info nfsd_info;
 #define nfsd_serv nfsd_info.serv
-	struct percpu_ref nfsd_serv_ref;
-	struct completion nfsd_serv_confirm_done;
-	struct completion nfsd_serv_free_done;
+
+	struct percpu_ref nfsd_net_ref;
+	struct completion nfsd_net_confirm_done;
+	struct completion nfsd_net_free_done;
 
 	/*
 	 * clientid and stateid data for construction of net unique COPY
@@ -219,8 +225,12 @@ struct nfsd_net {
 
 #if IS_ENABLED(CONFIG_NFS_LOCALIO)
 	/* Local clients to be invalidated when net is shut down */
+	spinlock_t              local_clients_lock;
 	struct list_head	local_clients;
 #endif
+	siphash_key_t		*fh_key;
+
+	struct nfsd_net_cb	*nfsd_cb;
 };
 
 /* Simple check to find out if a given net was properly initialized */
@@ -229,8 +239,8 @@ struct nfsd_net {
 extern bool nfsd_support_version(int vers);
 extern unsigned int nfsd_net_id;
 
-bool nfsd_serv_try_get(struct net *net);
-void nfsd_serv_put(struct net *net);
+bool nfsd_net_try_get(struct net *net);
+void nfsd_net_put(struct net *net);
 
 void nfsd_copy_write_verifier(__be32 verf[2], struct nfsd_net *nn);
 void nfsd_reset_write_verifier(struct nfsd_net *nn);

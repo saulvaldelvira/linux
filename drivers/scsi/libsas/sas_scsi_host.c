@@ -10,6 +10,7 @@
 #include <linux/firmware.h>
 #include <linux/export.h>
 #include <linux/ctype.h>
+#include <linux/hex.h>
 #include <linux/kernel.h>
 
 #include "sas_internal.h"
@@ -157,7 +158,8 @@ static struct sas_task *sas_create_task(struct scsi_cmnd *cmd,
 	return task;
 }
 
-int sas_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
+enum scsi_qc_status sas_queuecommand(struct Scsi_Host *host,
+				     struct scsi_cmnd *cmd)
 {
 	struct sas_internal *i = to_sas_internal(host->transportt);
 	struct domain_device *dev = cmd_to_domain_dev(cmd);
@@ -845,7 +847,7 @@ int sas_change_queue_depth(struct scsi_device *sdev, int depth)
 EXPORT_SYMBOL_GPL(sas_change_queue_depth);
 
 int sas_bios_param(struct scsi_device *scsi_dev,
-			  struct block_device *bdev,
+			  struct gendisk *unused,
 			  sector_t capacity, int *hsc)
 {
 	hsc[0] = 255;
@@ -859,13 +861,13 @@ EXPORT_SYMBOL_GPL(sas_bios_param);
 
 void sas_task_internal_done(struct sas_task *task)
 {
-	del_timer(&task->slow_task->timer);
+	timer_delete(&task->slow_task->timer);
 	complete(&task->slow_task->completion);
 }
 
 void sas_task_internal_timedout(struct timer_list *t)
 {
-	struct sas_task_slow *slow = from_timer(slow, t, timer);
+	struct sas_task_slow *slow = timer_container_of(slow, t, timer);
 	struct sas_task *task = slow->task;
 	bool is_completed = true;
 	unsigned long flags;
@@ -911,7 +913,7 @@ static int sas_execute_internal_abort(struct domain_device *device,
 
 		res = i->dft->lldd_execute_task(task, GFP_KERNEL);
 		if (res) {
-			del_timer_sync(&task->slow_task->timer);
+			timer_delete_sync(&task->slow_task->timer);
 			pr_err("Executing internal abort failed %016llx (%d)\n",
 			       SAS_ADDR(device->sas_addr), res);
 			break;
@@ -1010,7 +1012,7 @@ int sas_execute_tmf(struct domain_device *device, void *parameter,
 
 		res = i->dft->lldd_execute_task(task, GFP_KERNEL);
 		if (res) {
-			del_timer_sync(&task->slow_task->timer);
+			timer_delete_sync(&task->slow_task->timer);
 			pr_err("executing TMF task failed %016llx (%d)\n",
 			       SAS_ADDR(device->sas_addr), res);
 			break;
@@ -1180,7 +1182,7 @@ void sas_task_abort(struct sas_task *task)
 
 		if (!slow)
 			return;
-		if (!del_timer(&slow->timer))
+		if (!timer_delete(&slow->timer))
 			return;
 		slow->timer.function(&slow->timer);
 		return;

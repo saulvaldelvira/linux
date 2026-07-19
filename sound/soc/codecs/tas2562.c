@@ -459,7 +459,7 @@ static int tas2562_dac_event(struct snd_soc_dapm_widget *w,
 static int tas2562_volume_control_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct tas2562_data *tas2562 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.integer.value[0] = tas2562->volume_lvl;
@@ -469,7 +469,7 @@ static int tas2562_volume_control_get(struct snd_kcontrol *kcontrol,
 static int tas2562_volume_control_put(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct tas2562_data *tas2562 = snd_soc_component_get_drvdata(component);
 	int ret;
 	u32 reg_val;
@@ -513,17 +513,9 @@ static const struct snd_kcontrol_new vsense_switch =
 static const struct snd_kcontrol_new tas2562_snd_controls[] = {
 	SOC_SINGLE_TLV("Amp Gain Volume", TAS2562_PB_CFG1, 1, 0x1c, 0,
 		       tas2562_dac_tlv),
-	{
-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-		.name = "Digital Volume Control",
-		.index = 0,
-		.tlv.p = dvc_tlv,
-		.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE,
-		.info = snd_soc_info_volsw,
-		.get = tas2562_volume_control_get,
-		.put = tas2562_volume_control_put,
-		.private_value = SOC_SINGLE_VALUE(TAS2562_DVC_CFG1, 0, 110, 0, 0),
-	},
+	SOC_SINGLE_EXT_TLV("Digital Volume Control", TAS2562_DVC_CFG1, 0, 110, 0,
+			   tas2562_volume_control_get, tas2562_volume_control_put,
+			   dvc_tlv),
 };
 
 static const struct snd_soc_dapm_widget tas2110_dapm_widgets[] = {
@@ -683,11 +675,12 @@ static int tas2562_parse_dt(struct tas2562_data *tas2562)
 	if (tas2562->sdz_gpio == NULL) {
 		tas2562->sdz_gpio = devm_gpiod_get_optional(dev, "shut-down",
 							      GPIOD_OUT_HIGH);
-		if (IS_ERR(tas2562->sdz_gpio))
+		if (IS_ERR(tas2562->sdz_gpio)) {
 			if (PTR_ERR(tas2562->sdz_gpio) == -EPROBE_DEFER)
 				return -EPROBE_DEFER;
 
-		tas2562->sdz_gpio = NULL;
+			tas2562->sdz_gpio = NULL;
+		}
 	}
 
 	if (tas2562->model_id == TAS2110)
@@ -719,9 +712,9 @@ static int tas2562_parse_dt(struct tas2562_data *tas2562)
 }
 
 static const struct i2c_device_id tas2562_id[] = {
-	{ "tas2562", TAS2562 },
-	{ "tas2564", TAS2564 },
-	{ "tas2110", TAS2110 },
+	{ .name = "tas2562", .driver_data = TAS2562 },
+	{ .name = "tas2564", .driver_data = TAS2564 },
+	{ .name = "tas2110", .driver_data = TAS2110 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tas2562_id);

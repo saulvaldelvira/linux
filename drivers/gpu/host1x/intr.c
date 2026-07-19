@@ -92,8 +92,12 @@ void host1x_intr_handle_interrupt(struct host1x *host, unsigned int id)
 		host1x_fence_signal(fence);
 	}
 
-	/* Re-enable interrupt if necessary */
-	host1x_intr_update_hw_state(host, sp);
+	/*
+	 * Re-enable interrupt if necessary. The ISR already disabled the interrupt,
+	 * so if no fences remain, no update is needed.
+	 */
+	if (!list_empty(&sp->fences.list))
+		host1x_intr_update_hw_state(host, sp);
 
 	spin_unlock(&sp->fences.lock);
 }
@@ -103,8 +107,6 @@ int host1x_intr_init(struct host1x *host)
 	struct host1x_intr_irq_data *irq_data;
 	unsigned int id;
 	int i, err;
-
-	mutex_init(&host->intr_mutex);
 
 	for (id = 0; id < host1x_syncpt_nb_pts(host); ++id) {
 		struct host1x_syncpt *syncpt = &host->syncpt[id];

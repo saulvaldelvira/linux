@@ -27,7 +27,7 @@ struct folio_queue *netfs_folioq_alloc(unsigned int rreq_id, gfp_t gfp,
 {
 	struct folio_queue *fq;
 
-	fq = kmalloc(sizeof(*fq), gfp);
+	fq = kmalloc_obj(*fq, gfp);
 	if (fq) {
 		netfs_stat(&netfs_n_folioq);
 		folioq_init(fq, rreq_id);
@@ -146,10 +146,6 @@ ssize_t rolling_buffer_load_from_ra(struct rolling_buffer *roll,
 
 	/* Store the counter after setting the slot. */
 	smp_store_release(&roll->next_head_slot, to);
-
-	for (; ix < folioq_nr_slots(fq); ix++)
-		folioq_clear(fq, ix);
-
 	return size;
 }
 

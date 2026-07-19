@@ -22,6 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/power/charger-manager.h>
 #include <linux/regulator/consumer.h>
+#include <linux/string_choices.h>
 #include <linux/sysfs.h>
 #include <linux/of.h>
 #include <linux/thermal.h>
@@ -302,8 +303,10 @@ static bool is_full_charged(struct charger_manager *cm)
 			if (cm->battery_status == POWER_SUPPLY_STATUS_FULL
 					&& desc->fullbatt_vchkdrop_uV)
 				uV += desc->fullbatt_vchkdrop_uV;
-			if (uV >= desc->fullbatt_uV)
-				return true;
+			if (uV >= desc->fullbatt_uV) {
+				is_full = true;
+				goto out;
+			}
 		}
 	}
 
@@ -880,26 +883,22 @@ static bool cm_setup_timer(void)
 	mutex_unlock(&cm_list_mtx);
 
 	if (timer_req && cm_timer) {
-		ktime_t now, add;
-
 		/*
 		 * Set alarm with the polling interval (wakeup_ms)
 		 * The alarm time should be NOW + CM_RTC_SMALL or later.
 		 */
-		if (wakeup_ms == UINT_MAX ||
-			wakeup_ms < CM_RTC_SMALL * MSEC_PER_SEC)
+		if (wakeup_ms == UINT_MAX || wakeup_ms < CM_RTC_SMALL * MSEC_PER_SEC)
 			wakeup_ms = 2 * CM_RTC_SMALL * MSEC_PER_SEC;
 
 		pr_info("Charger Manager wakeup timer: %u ms\n", wakeup_ms);
 
-		now = ktime_get_boottime();
-		add = ktime_set(wakeup_ms / MSEC_PER_SEC,
-				(wakeup_ms % MSEC_PER_SEC) * NSEC_PER_MSEC);
-		alarm_start(cm_timer, ktime_add(now, add));
-
 		cm_suspend_duration_ms = wakeup_ms;
 
-		return true;
+		/*
+		 * The timer should always be queued as the timeout is at least
+		 * two seconds out. Handle it correctly nevertheless.
+		 */
+		return alarm_start_timer(cm_timer, ktime_add_ms(0, wakeup_ms), true);
 	}
 	return false;
 }
@@ -1088,7 +1087,7 @@ static ssize_t charger_state_show(struct device *dev,
 	if (!charger->externally_control)
 		state = regulator_is_enabled(charger->consumer);
 
-	return sysfs_emit(buf, "%s\n", state ? "enabled" : "disabled");
+	return sysfs_emit(buf, "%s\n", str_enabled_disabled(state));
 }
 
 static ssize_t charger_externally_control_show(struct device *dev,
@@ -1652,8 +1651,8 @@ static void charger_manager_remove(struct platform_device *pdev)
 }
 
 static const struct platform_device_id charger_manager_id[] = {
-	{ "charger-manager", 0 },
-	{ },
+	{ .name = "charger-manager" },
+	{ }
 };
 MODULE_DEVICE_TABLE(platform, charger_manager_id);
 

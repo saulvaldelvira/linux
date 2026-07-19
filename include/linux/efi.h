@@ -61,7 +61,7 @@ typedef void *efi_handle_t;
 
 /*
  * The UEFI spec and EDK2 reference implementation both define EFI_GUID as
- * struct { u32 a; u16; b; u16 c; u8 d[8]; }; and so the implied alignment
+ * struct { u32 a; u16 b; u16 c; u8 d[8]; }; and so the implied alignment
  * is 32 bits not 8 bits like our guid_t. In some cases (i.e., on 32-bit ARM),
  * this means that firmware services invoked by the kernel may assume that
  * efi_guid_t* arguments are 32-bit aligned, and use memory accessors that
@@ -114,21 +114,22 @@ typedef	struct {
 #define EFI_MAX_MEMORY_TYPE		16
 
 /* Attribute values: */
-#define EFI_MEMORY_UC		((u64)0x0000000000000001ULL)	/* uncached */
-#define EFI_MEMORY_WC		((u64)0x0000000000000002ULL)	/* write-coalescing */
-#define EFI_MEMORY_WT		((u64)0x0000000000000004ULL)	/* write-through */
-#define EFI_MEMORY_WB		((u64)0x0000000000000008ULL)	/* write-back */
-#define EFI_MEMORY_UCE		((u64)0x0000000000000010ULL)	/* uncached, exported */
-#define EFI_MEMORY_WP		((u64)0x0000000000001000ULL)	/* write-protect */
-#define EFI_MEMORY_RP		((u64)0x0000000000002000ULL)	/* read-protect */
-#define EFI_MEMORY_XP		((u64)0x0000000000004000ULL)	/* execute-protect */
-#define EFI_MEMORY_NV		((u64)0x0000000000008000ULL)	/* non-volatile */
-#define EFI_MEMORY_MORE_RELIABLE \
-				((u64)0x0000000000010000ULL)	/* higher reliability */
-#define EFI_MEMORY_RO		((u64)0x0000000000020000ULL)	/* read-only */
-#define EFI_MEMORY_SP		((u64)0x0000000000040000ULL)	/* soft reserved */
-#define EFI_MEMORY_CPU_CRYPTO	((u64)0x0000000000080000ULL)	/* supports encryption */
-#define EFI_MEMORY_RUNTIME	((u64)0x8000000000000000ULL)	/* range requires runtime mapping */
+#define EFI_MEMORY_UC			BIT_ULL(0)	/* uncached */
+#define EFI_MEMORY_WC			BIT_ULL(1)	/* write-coalescing */
+#define EFI_MEMORY_WT			BIT_ULL(2)	/* write-through */
+#define EFI_MEMORY_WB			BIT_ULL(3)	/* write-back */
+#define EFI_MEMORY_UCE			BIT_ULL(4)	/* uncached, exported */
+#define EFI_MEMORY_WP			BIT_ULL(12)	/* write-protect */
+#define EFI_MEMORY_RP			BIT_ULL(13)	/* read-protect */
+#define EFI_MEMORY_XP			BIT_ULL(14)	/* execute-protect */
+#define EFI_MEMORY_NV			BIT_ULL(15)	/* non-volatile */
+#define EFI_MEMORY_MORE_RELIABLE	BIT_ULL(16)	/* higher reliability */
+#define EFI_MEMORY_RO			BIT_ULL(17)	/* read-only */
+#define EFI_MEMORY_SP			BIT_ULL(18)	/* soft reserved */
+#define EFI_MEMORY_CPU_CRYPTO		BIT_ULL(19)	/* supports encryption */
+#define EFI_MEMORY_HOT_PLUGGABLE	BIT_ULL(20)	/* supports unplugging at runtime */
+#define EFI_MEMORY_RUNTIME		BIT_ULL(63)	/* range requires runtime mapping */
+
 #define EFI_MEMORY_DESCRIPTOR_VERSION	1
 
 #define EFI_PAGE_SHIFT		12
@@ -289,7 +290,7 @@ typedef efi_status_t efi_get_variable_t (efi_char16_t *name, efi_guid_t *vendor,
 					 unsigned long *data_size, void *data);
 typedef efi_status_t efi_get_next_variable_t (unsigned long *name_size, efi_char16_t *name,
 					      efi_guid_t *vendor);
-typedef efi_status_t efi_set_variable_t (efi_char16_t *name, efi_guid_t *vendor, 
+typedef efi_status_t efi_set_variable_t (efi_char16_t *name, efi_guid_t *vendor,
 					 u32 attr, unsigned long data_size,
 					 void *data);
 typedef efi_status_t efi_get_next_high_mono_count_t (u32 *count);
@@ -372,6 +373,8 @@ void efi_native_runtime_setup(void);
 #define EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID	EFI_GUID(0x8b843e20, 0x8132, 0x4852,  0x90, 0xcc, 0x55, 0x1a, 0x4e, 0x4a, 0x7f, 0x1c)
 #define EFI_DEVICE_PATH_FROM_TEXT_PROTOCOL_GUID	EFI_GUID(0x05c99a21, 0xc70f, 0x4ad2,  0x8a, 0x5f, 0x35, 0xdf, 0x33, 0x43, 0xf5, 0x1e)
 #define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID	EFI_GUID(0x9042a9de, 0x23dc, 0x4a38,  0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a)
+#define EFI_EDID_DISCOVERED_PROTOCOL_GUID	EFI_GUID(0x1c0c34f6, 0xd380, 0x41fa,  0xa0, 0x49, 0x8a, 0xd0, 0x6c, 0x1a, 0x66, 0xaa)
+#define EFI_EDID_ACTIVE_PROTOCOL_GUID		EFI_GUID(0xbd8c1056, 0x9f36, 0x44ec,  0x92, 0xa8, 0xa6, 0x33, 0x7f, 0x81, 0x79, 0x86)
 #define EFI_PCI_IO_PROTOCOL_GUID		EFI_GUID(0x4cf5b200, 0x68b8, 0x4ca5,  0x9e, 0xec, 0xb2, 0x3e, 0x3f, 0x50, 0x02, 0x9a)
 #define EFI_FILE_INFO_ID			EFI_GUID(0x09576e92, 0x6d3f, 0x11d2,  0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b)
 #define EFI_SYSTEM_RESOURCE_TABLE_GUID		EFI_GUID(0xb122a263, 0x3661, 0x4f68,  0x99, 0x29, 0x78, 0xf8, 0xb0, 0xd6, 0x21, 0x80)
@@ -403,11 +406,12 @@ void efi_native_runtime_setup(void);
 #define EFI_CC_FINAL_EVENTS_TABLE_GUID		EFI_GUID(0xdd4a4648, 0x2de7, 0x4665, 0x96, 0x4d, 0x21, 0xd9, 0xef, 0x5f, 0xb4, 0x46)
 
 /*
- * This GUID is used to pass to the kernel proper the struct screen_info
- * structure that was populated by the stub based on the GOP protocol instance
- * associated with ConOut
+ * This GUIDs are used to pass to the kernel proper the primary
+ * display that has been populated by the stub based on the GOP
+ * instance associated with ConOut.
  */
-#define LINUX_EFI_SCREEN_INFO_TABLE_GUID	EFI_GUID(0xe03fc20a, 0x85dc, 0x406e,  0xb9, 0x0e, 0x4a, 0xb5, 0x02, 0x37, 0x1d, 0x95)
+#define LINUX_EFI_PRIMARY_DISPLAY_TABLE_GUID	EFI_GUID(0xe03fc20a, 0x85dc, 0x406e,  0xb9, 0x0e, 0x4a, 0xb5, 0x02, 0x37, 0x1d, 0x95)
+
 #define LINUX_EFI_ARM_CPU_STATE_TABLE_GUID	EFI_GUID(0xef79e4aa, 0x3c3d, 0x4989,  0xb9, 0x02, 0x07, 0xa9, 0x43, 0xe5, 0x50, 0xd2)
 #define LINUX_EFI_LOADER_ENTRY_GUID		EFI_GUID(0x4a67b082, 0x0a4c, 0x41cf,  0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f)
 #define LINUX_EFI_RANDOM_SEED_TABLE_GUID	EFI_GUID(0x1ce1e5bc, 0x7ceb, 0x42f2,  0x81, 0xe5, 0x8a, 0xad, 0xf1, 0x80, 0xf5, 0x7b)
@@ -438,6 +442,7 @@ void efi_native_runtime_setup(void);
 
 /* OVMF protocol GUIDs */
 #define OVMF_SEV_MEMORY_ACCEPTANCE_PROTOCOL_GUID	EFI_GUID(0xc5a010fe, 0x38a7, 0x4531,  0x8a, 0x4a, 0x05, 0x00, 0xd2, 0xfd, 0x16, 0x49)
+#define OVMF_MEMORY_LOG_TABLE_GUID		EFI_GUID(0x95305139, 0xb20f, 0x4723,  0x84, 0x25, 0x62, 0x7c, 0x88, 0x8f, 0xf1, 0x21)
 
 typedef struct {
 	efi_guid_t guid;
@@ -641,6 +646,7 @@ extern struct efi {
 	unsigned long			esrt;			/* ESRT table */
 	unsigned long			tpm_log;		/* TPM2 Event Log table */
 	unsigned long			tpm_final_log;		/* TPM2 Final Events Log table */
+	unsigned long                   ovmf_debug_log;
 	unsigned long			mokvar_table;		/* MOK variable config table */
 	unsigned long			coco_secret;		/* Confidential computing secret table */
 	unsigned long			unaccepted;		/* Unaccepted memory table */
@@ -769,7 +775,7 @@ extern unsigned long efi_mem_attr_table;
  */
 typedef int (*efi_memattr_perm_setter)(struct mm_struct *, efi_memory_desc_t *, bool);
 
-extern int efi_memattr_init(void);
+extern void efi_memattr_init(void);
 extern int efi_memattr_apply_permissions(struct mm_struct *mm,
 					 efi_memattr_perm_setter fn);
 
@@ -825,27 +831,6 @@ extern int __init parse_efi_signature_list(
 	const char *source,
 	const void *data, size_t size,
 	efi_element_handler_t (*get_handler_for_guid)(const efi_guid_t *));
-
-/**
- * efi_range_is_wc - check the WC bit on an address range
- * @start: starting kvirt address
- * @len: length of range
- *
- * Consult the EFI memory map and make sure it's ok to set this range WC.
- * Returns true or false.
- */
-static inline int efi_range_is_wc(unsigned long start, unsigned long len)
-{
-	unsigned long i;
-
-	for (i = 0; i < len; i += (1UL << EFI_PAGE_SHIFT)) {
-		unsigned long paddr = __pa(start + i);
-		if (!(efi_mem_attributes(paddr) & EFI_MEMORY_WC))
-			return 0;
-	}
-	/* The range checked out */
-	return 1;
-}
 
 /*
  * We play games with efi_enabled so that the compiler will, if
@@ -1123,6 +1108,8 @@ static inline bool efi_runtime_disabled(void) { return true; }
 extern void efi_call_virt_check_flags(unsigned long flags, const void *caller);
 extern unsigned long efi_call_virt_save_flags(void);
 
+void efi_runtime_assert_lock_held(void);
+
 enum efi_secureboot_mode {
 	efi_secureboot_mode_unset,
 	efi_secureboot_mode_unknown,
@@ -1333,7 +1320,7 @@ struct linux_efi_initrd {
 
 bool xen_efi_config_table_is_usable(const efi_guid_t *guid, unsigned long table);
 
-static inline
+static __always_inline
 bool efi_config_table_is_usable(const efi_guid_t *guid, unsigned long table)
 {
 	if (!IS_ENABLED(CONFIG_XEN_EFI))
@@ -1342,6 +1329,8 @@ bool efi_config_table_is_usable(const efi_guid_t *guid, unsigned long table)
 }
 
 umode_t efi_attr_is_visible(struct kobject *kobj, struct attribute *attr, int n);
+
+int ovmf_log_probe(unsigned long ovmf_debug_log_table);
 
 /*
  * efivar ops event type

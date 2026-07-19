@@ -2,8 +2,8 @@
 
 #include <net/netdev_queues.h>
 
-#include "netlink.h"
 #include "common.h"
+#include "netlink.h"
 
 struct rings_req_info {
 	struct ethnl_req_info		base;
@@ -63,9 +63,9 @@ static int rings_reply_size(const struct ethnl_req_info *req_base,
 	       nla_total_size(sizeof(u32)) +	/* _RINGS_TX */
 	       nla_total_size(sizeof(u32)) +	/* _RINGS_RX_BUF_LEN */
 	       nla_total_size(sizeof(u8))  +	/* _RINGS_TCP_DATA_SPLIT */
-	       nla_total_size(sizeof(u32)  +	/* _RINGS_CQE_SIZE */
+	       nla_total_size(sizeof(u32)) +	/* _RINGS_CQE_SIZE */
 	       nla_total_size(sizeof(u8))  +	/* _RINGS_TX_PUSH */
-	       nla_total_size(sizeof(u8))) +	/* _RINGS_RX_PUSH */
+	       nla_total_size(sizeof(u8))  +	/* _RINGS_RX_PUSH */
 	       nla_total_size(sizeof(u32)) +	/* _RINGS_TX_PUSH_BUF_LEN */
 	       nla_total_size(sizeof(u32)) +	/* _RINGS_TX_PUSH_BUF_LEN_MAX */
 	       nla_total_size(sizeof(u32)) +	/* _RINGS_HDS_THRESH */
@@ -215,17 +215,16 @@ ethnl_set_rings_validate(struct ethnl_req_info *req_info,
 static int
 ethnl_set_rings(struct ethnl_req_info *req_info, struct genl_info *info)
 {
-	struct kernel_ethtool_ringparam kernel_ringparam = {};
-	struct ethtool_ringparam ringparam = {};
+	struct kernel_ethtool_ringparam kernel_ringparam;
 	struct net_device *dev = req_info->dev;
+	struct ethtool_ringparam ringparam;
 	struct nlattr **tb = info->attrs;
 	const struct nlattr *err_attr;
 	bool mod = false;
 	int ret;
 
-	dev->ethtool_ops->get_ringparam(dev, &ringparam,
-					&kernel_ringparam, info->extack);
-	kernel_ringparam.tcp_data_split = dev->cfg->hds_config;
+	ethtool_ringparam_get_cfg(dev, &ringparam, &kernel_ringparam,
+				  info->extack);
 
 	ethnl_update_u32(&ringparam.rx_pending, tb[ETHTOOL_A_RINGS_RX], &mod);
 	ethnl_update_u32(&ringparam.rx_mini_pending,
