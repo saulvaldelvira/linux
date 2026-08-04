@@ -189,6 +189,16 @@ config ACER_WMI
 	  If you have an ACPI-WMI compatible Acer/ Wistron laptop, say Y or M
 	  here.
 
+config ACER_WMI_BATTERY
+	tristate "Acer WMI Battery Health Driver"
+	depends on ACPI_WMI
+	help
+	  This driver provides control over battery charge limit (health mode)
+	  and calibration for some Acer laptops.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called acer-wmi-battery.
+
 source "drivers/platform/x86/amd/Kconfig"
 
 config ADV_SWBUTTON
